@@ -14,10 +14,8 @@ three distinct use cases:
 Canonical state is the Cyoda workflow JSON; the graph is a projection only.
 Round-tripping is byte-identical.
 
-> Source of truth for design & semantics:
-> [`cyoda-workflow-editor-engineering-spec.md`](file:///Users/patrick/Claude_work/outputs/cyoda-workflow-editor-engineering-spec.md) (spec)
-> and [`users-patrick-claude-work-outputs-cyoda-glowing-bonbon.md`](file:///Users/patrick/.claude/plans/users-patrick-claude-work-outputs-cyoda-glowing-bonbon.md) (plan).
-> On any conflict, the spec wins.
+> Repo-local implementation notes currently live in
+> [`ai/PLAN-workflow-editor-editing.md`](ai/PLAN-workflow-editor-editing.md).
 
 ---
 
@@ -51,6 +49,25 @@ workflow-core
 
 Packages use explicit `exports` (no `export *` at roots) and ship ESM + CJS
 + `.d.ts` via `tsup`.
+
+## Package publication targets
+
+Publishable npm packages under the `@cyoda` scope:
+
+- `@cyoda/workflow-core`
+- `@cyoda/workflow-graph`
+- `@cyoda/workflow-layout`
+- `@cyoda/workflow-monaco`
+- `@cyoda/workflow-react`
+- `@cyoda/workflow-viewer`
+
+Private workspace packages:
+
+- `cyoda-workflow-editor` (root workspace package)
+- `@cyoda/docs-embed-demo` (internal demo app)
+
+All public packages are published to npm under the `@cyoda` scope with
+Changesets-managed versioning.
 
 ---
 
@@ -96,6 +113,38 @@ pnpm --filter @cyoda/docs-embed-demo test:visual     # diff vs baselines
 
 [Inference] Playwright browsers must be installed once via `pnpm exec
 playwright install chromium` before the visual commands succeed.
+
+## Release and publishing
+
+This monorepo uses [Changesets](https://github.com/changesets/changesets)
+for versioning and npm releases.
+
+Basic release flow:
+
+```sh
+# 1. Add a changeset describing the package changes
+pnpm changeset
+
+# 2. Review the generated markdown in .changeset/
+
+# 3. Version packages locally when you are ready
+pnpm version-packages
+
+# 4. Publish from CI on main via the release workflow
+```
+
+The release workflow publishes only the public library packages listed
+above. The root workspace package and `@cyoda/docs-embed-demo` remain
+private and are not publish targets.
+
+Consumer install examples:
+
+```sh
+npm install @cyoda/workflow-core
+npm install @cyoda/workflow-core @cyoda/workflow-graph @cyoda/workflow-viewer react react-dom
+npm install @cyoda/workflow-core @cyoda/workflow-graph @cyoda/workflow-layout @cyoda/workflow-viewer @cyoda/workflow-react react react-dom reactflow
+npm install @cyoda/workflow-core @cyoda/workflow-monaco monaco-editor
+```
 
 ---
 
@@ -450,10 +499,9 @@ These items are scoped but not yet delivered:
 
 Read these first, in order:
 
-1. `/Users/patrick/.claude/plans/users-patrick-claude-work-outputs-cyoda-glowing-bonbon.md` — implementation plan (phases, gates, deferred work).
-2. `/Users/patrick/Claude_work/outputs/cyoda-workflow-editor-engineering-spec.md` — engineering spec (normative).
-3. `/Users/patrick/Claude_work/outputs/workflow-config-guide.md` — Cyoda JSON model guide (schema wins on conflict).
-4. `SVG-workflow.png` at the repo root — visual reference for the viewer.
+1. [`README.md`](README.md) — package overview, usage, and release flow.
+2. [`ai/PLAN-workflow-editor-editing.md`](ai/PLAN-workflow-editor-editing.md) — implementation notes and phased plan.
+3. `ELK-SVG-workflow.png` at the repo root — visual reference for the viewer.
 
 Invariants that must not be broken without spec consultation:
 
@@ -486,4 +534,4 @@ timeline, SVG-as-primary-runtime.
 
 ## Licence
 
-UNLICENSED — internal Cyoda monorepo. Do not publish to public npm.
+Licensed under Apache-2.0. See [LICENSE](LICENSE).

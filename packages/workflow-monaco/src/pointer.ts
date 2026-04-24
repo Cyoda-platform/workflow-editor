@@ -188,7 +188,9 @@ function ordinalOfTransition(
   meta: EditorMetadata,
 ): number {
   let i = 0;
-  for (const [uuid, ptr] of Object.entries(meta.ids.transitions)) {
+  for (const [uuid, ptr] of Object.entries(meta.ids.transitions) as Array<
+    [string, EditorMetadata["ids"]["transitions"][string]]
+  >) {
     if (ptr.workflow === workflow && ptr.state === state) {
       if (uuid === transitionUuid) return i;
       i++;
@@ -205,7 +207,9 @@ function ordinalOfProcessor(
   meta: EditorMetadata,
 ): number {
   let i = 0;
-  for (const [uuid, ptr] of Object.entries(meta.ids.processors)) {
+  for (const [uuid, ptr] of Object.entries(meta.ids.processors) as Array<
+    [string, EditorMetadata["ids"]["processors"][string]]
+  >) {
     if (
       ptr.workflow === workflow &&
       ptr.state === state &&

@@ -49,7 +49,9 @@ function idForJsonPath(
   const stateCode = path[3];
 
   if (path.length === 4) {
-    const entry = Object.entries(meta.ids.states).find(
+    const entry = (Object.entries(meta.ids.states) as Array<
+      [string, EditorMetadata["ids"]["states"][string]]
+    >).find(
       ([, ptr]) => ptr.workflow === wf.name && ptr.state === stateCode,
     );
     return entry ? entry[0] : null;
@@ -84,7 +86,9 @@ function findTransitionUuidByOrdinal(
   meta: EditorMetadata,
 ): string | null {
   let i = 0;
-  for (const [uuid, ptr] of Object.entries(meta.ids.transitions)) {
+  for (const [uuid, ptr] of Object.entries(meta.ids.transitions) as Array<
+    [string, EditorMetadata["ids"]["transitions"][string]]
+  >) {
     if (ptr.workflow === workflow && ptr.state === state) {
       if (i === ordinal) return uuid;
       i++;
@@ -101,7 +105,9 @@ function findProcessorUuidByOrdinal(
   meta: EditorMetadata,
 ): string | null {
   let i = 0;
-  for (const [uuid, ptr] of Object.entries(meta.ids.processors)) {
+  for (const [uuid, ptr] of Object.entries(meta.ids.processors) as Array<
+    [string, EditorMetadata["ids"]["processors"][string]]
+  >) {
     if (
       ptr.workflow === workflow &&
       ptr.state === state &&

@@ -66,6 +66,8 @@ function toSeverity(monaco: MonacoLike, s: ValidationIssue["severity"]): number 
       return monaco.MarkerSeverity.Warning;
     case "info":
       return monaco.MarkerSeverity.Info;
+    default:
+      return monaco.MarkerSeverity.Info;
   }
 }
 

@@ -10,6 +10,7 @@ import { useEditorStore } from "../state/store.js";
 import { deriveFromDocument } from "../state/derive.js";
 import type { EditorMode, Selection } from "../state/types.js";
 import { Canvas } from "./Canvas.js";
+import { resolveConnection, type PendingConnect } from "./resolveConnection.js";
 import { Inspector } from "../inspector/Inspector.js";
 import { Toolbar } from "../toolbar/Toolbar.js";
 import { WorkflowTabs } from "../toolbar/WorkflowTabs.js";
@@ -27,12 +28,6 @@ export interface WorkflowEditorProps {
 interface PendingDelete {
   workflow: string;
   stateCode: string;
-}
-
-interface PendingConnect {
-  workflow: string;
-  fromState: string;
-  toState: string;
 }
 
 function defaultNewWorkflow(existing: string[]): Workflow {
@@ -87,32 +82,8 @@ export function WorkflowEditor({
   };
 
   const handleConnect = (connection: Connection) => {
-    if (!connection.source || !connection.target) return;
-    const resolvedSource = state.document.session.workflows
-      .flatMap((w) => Object.entries(w.states).map(([code, s]) => ({ wf: w, code, s })))
-      .find((e) => {
-        const srcStateId = state.document.meta.ids.workflows[e.wf.name];
-        // Canvas nodes carry the synthetic state id via toRfNodes, so we match by id lookup.
-        const stateUuid = Object.entries(state.document.meta.ids.states).find(
-          ([, ptr]) => ptr.workflow === e.wf.name && ptr.state === e.code,
-        )?.[0];
-        return stateUuid === connection.source || srcStateId === connection.source;
-      });
-    const resolvedTarget = state.document.session.workflows
-      .flatMap((w) => Object.entries(w.states).map(([code, s]) => ({ wf: w, code, s })))
-      .find((e) => {
-        const stateUuid = Object.entries(state.document.meta.ids.states).find(
-          ([, ptr]) => ptr.workflow === e.wf.name && ptr.state === e.code,
-        )?.[0];
-        return stateUuid === connection.target;
-      });
-    if (!resolvedSource || !resolvedTarget) return;
-    if (resolvedSource.wf.name !== resolvedTarget.wf.name) return;
-    setPendingConnect({
-      workflow: resolvedSource.wf.name,
-      fromState: resolvedSource.code,
-      toState: resolvedTarget.code,
-    });
+    const resolved = resolveConnection(state.document, connection);
+    if (resolved) setPendingConnect(resolved);
   };
 
   const confirmConnect = (name: string) => {

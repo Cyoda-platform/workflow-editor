@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { StateNode } from "@cyoda/workflow-graph";
 import {
@@ -54,7 +54,7 @@ function RfStateNodeImpl({ data, selected }: NodeProps<RfStateNodeData>) {
       data-testid={`rf-state-${node.stateCode}`}
     >
       {ANCHOR_SIDES.map(({ side, position }) => (
-        <AnchorHandles
+        <AnchorHandle
           key={side}
           side={side}
           position={position}
@@ -124,7 +124,7 @@ const ANCHOR_SIDES: ReadonlyArray<{
   { side: "left", position: Position.Left },
 ];
 
-function AnchorHandles({
+function AnchorHandle({
   side,
   position,
   color,
@@ -133,25 +133,41 @@ function AnchorHandles({
   position: Position;
   color: string;
 }) {
-  const common = {
-    background: color,
+  const isVertical = position === Position.Top || position === Position.Bottom;
+
+  // Small visible dot centered on the edge, non-interactive.
+  const dotStyle: CSSProperties = {
+    position: "absolute",
     width: 8,
     height: 8,
-  } as const;
+    background: color,
+    borderRadius: "50%",
+    pointerEvents: "none",
+    ...(side === "top"
+      ? { top: -4, left: "calc(50% - 4px)" }
+      : side === "bottom"
+        ? { bottom: -4, left: "calc(50% - 4px)" }
+        : side === "left"
+          ? { left: -4, top: "calc(50% - 4px)" }
+          : { right: -4, top: "calc(50% - 4px)" }),
+  };
+
   return (
     <>
+      {/* Large transparent hit area spanning most of the edge for forgiving drops. */}
       <Handle
-        id={`${side}-source`}
+        id={side}
         type="source"
         position={position}
-        style={common}
+        style={{
+          background: "transparent",
+          border: "none",
+          borderRadius: 0,
+          width: isVertical ? "80%" : 16,
+          height: isVertical ? 16 : "80%",
+        }}
       />
-      <Handle
-        id={`${side}-target`}
-        type="target"
-        position={position}
-        style={common}
-      />
+      <div style={dotStyle} />
     </>
   );
 }

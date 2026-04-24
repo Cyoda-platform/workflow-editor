@@ -2,11 +2,21 @@
   "name": "@cyoda/workflow-viewer",
   "version": "0.0.0",
   "description": "Slim read-only SVG renderer for Cyoda workflows.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cyoda-platform/workflow-editor.git",
+    "directory": "packages/workflow-viewer"
+  },
+  "homepage": "https://github.com/Cyoda-platform/workflow-editor#readme",
+  "bugs": {
+    "url": "https://github.com/Cyoda-platform/workflow-editor/issues"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -19,10 +29,14 @@
       "require": "./dist/theme/index.cjs"
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },

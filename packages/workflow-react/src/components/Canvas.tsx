@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Background,
+  ConnectionMode,
   Controls,
   MiniMap,
   ReactFlow,
@@ -120,9 +121,8 @@ function anchorHandleId(
   anchor: TransitionEdge["sourceAnchor"],
   role: "source" | "target",
 ): string | undefined {
-  if (anchor) return `${anchor}-${role}`;
-  // Default handles (no explicit anchor set): bottom for source, top for target.
-  return role === "source" ? "bottom-source" : "top-target";
+  if (anchor) return anchor;
+  return role === "source" ? "bottom" : "top";
 }
 
 function groupIssuesByNode(
@@ -196,6 +196,7 @@ function CanvasInner({
         onEdgeClick={onEdgeClick}
         onPaneClick={() => onSelectionChange(null)}
         onConnect={readOnly ? undefined : onConnect}
+        connectionMode={ConnectionMode.Loose}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         elementsSelectable
