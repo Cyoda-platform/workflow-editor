@@ -1,7 +1,7 @@
 {
   "name": "@cyoda/workflow-react",
   "version": "0.0.0",
-  "description": "React-based editor shell for Cyoda workflows.",
+  "description": "Browser-based React editor shell for Cyoda workflows.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": ["**/*.css"],

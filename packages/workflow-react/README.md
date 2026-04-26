@@ -9,6 +9,12 @@ layout, and viewer packages.
 npm install @cyoda/workflow-core @cyoda/workflow-graph @cyoda/workflow-layout @cyoda/workflow-viewer @cyoda/workflow-react react react-dom reactflow
 ```
 
+## Runtime notes
+
+- Intended for browser-based React applications with CSS bundling enabled.
+- Imports `reactflow/dist/style.css` as part of the public entrypoint.
+- Not server-renderable in a plain Node.js runtime without a bundler setup that handles CSS imports.
+
 ## Highlights
 
 - Render the full workflow editing experience
