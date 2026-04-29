@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   GraphDocument,
   GraphEdge,
@@ -6,7 +6,7 @@ import type {
   StateNode,
   TransitionEdge,
 } from "@cyoda/workflow-graph";
-import { simpleLayout, type LayoutResult, type NodePosition } from "../layout.js";
+import { simpleLayout, nudgeLabels, type LayoutResult, type NodePosition } from "../layout.js";
 import { usePanZoom } from "../hooks/usePanZoom.js";
 import { Defs } from "./Defs.js";
 import { StartMarker } from "./StartMarker.js";
@@ -62,6 +62,39 @@ export function WorkflowViewer({
     () => graph.edges.filter((e): e is TransitionEdge => e.kind === "transition"),
     [graph.edges],
   );
+
+  // Dev-mode hint when the fallback renderer is used on a branching graph.
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" || layout) return;
+    const sourceCounts = new Map<string, number>();
+    for (const e of graph.edges) {
+      if (e.kind !== "transition") continue;
+      sourceCounts.set(e.sourceId, (sourceCounts.get(e.sourceId) ?? 0) + 1);
+    }
+    if ([...sourceCounts.values()].some((n) => n > 1)) {
+      console.warn(
+        "[WorkflowViewer] Rendering without an ELK layout — branching graphs may not look polished. " +
+          "Pass a layout from `layoutGraph()` (@cyoda/workflow-layout) for best results.",
+      );
+    }
+  }, [layout, graph.edges]);
+
+  // Pre-compute fallback label positions with collision avoidance.
+  // Only used when effectiveLayout has no .edges (the ELK path already provides label coords).
+  const fallbackLabelPositions = useMemo(() => {
+    if (effectiveLayout.edges) return null;
+    const CHAR_W = 6.5;
+    const PILL_H = 24;
+    const items = transitionEdges.flatMap((edge) => {
+      const source = effectiveLayout.positions.get(edge.sourceId);
+      const target = effectiveLayout.positions.get(edge.targetId);
+      if (!source || !target) return [];
+      const { midX, midY } = computeEdgeGeometry(edge, source, target);
+      const pillW = Math.max(40, edge.summary.display.length * CHAR_W + 12);
+      return [{ id: edge.id, midX, midY, pillW, pillH: PILL_H }];
+    });
+    return nudgeLabels(items);
+  }, [effectiveLayout, transitionEdges]);
 
   const highlightSet = useMemo(
     () => computeHighlightSet(hovered ?? selection, graph.nodes, graph.edges),
@@ -141,9 +174,11 @@ export function WorkflowViewer({
           const target = effectiveLayout.positions.get(edge.targetId);
           if (!source || !target) return null;
           const route = effectiveLayout.edges?.get(edge.id);
+          // ELK path: use pre-placed label coords from the route.
+          // Fallback path: use nudge-adjusted positions (collision-free).
           const labelPos = route
             ? { midX: route.labelX, midY: route.labelY }
-            : computeEdgeGeometry(edge, source, target);
+            : (fallbackLabelPositions?.get(edge.id) ?? computeEdgeGeometry(edge, source, target));
           const isHighlighted = highlightSet?.has(edge.id) ?? false;
           const isDimmed = anythingFocused && !isHighlighted;
           return (

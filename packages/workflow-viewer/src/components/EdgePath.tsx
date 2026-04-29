@@ -45,10 +45,13 @@ export function computeEdgeGeometry(
   source: NodePosition,
   target: NodePosition,
 ): EdgeGeometry {
+  // Default ports: source exits from bottom-centre, target enters at top-centre.
+  // simpleLayout always produces top-down BFS layers so this avoids the arrowhead
+  // landing under the target node (which happens when both ends are at node centre).
   const sx = source.x + source.width / 2;
-  const sy = source.y + source.height / 2;
+  const sy = source.y + source.height;
   const tx = target.x + target.width / 2;
-  const ty = target.y + target.height / 2;
+  const ty = target.y;
 
   if (edge.isSelf) {
     const rightX = source.x + source.width;

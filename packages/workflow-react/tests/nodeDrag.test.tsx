@@ -1,0 +1,555 @@
+/**
+ * Regression tests for the node-drag / edge-routing bug.
+ *
+ * Root cause: the interactive React Flow edge renderer was still allowed to
+ * render from stale ELK route points/label positions instead of the live
+ * sourceX/Y and targetX/Y props React Flow recalculates as nodes move.
+ *
+ * Fix: Canvas keeps local controlled React Flow node state with
+ * `onNodesChange`/`applyNodeChanges` plus `onNodeDrag`, and RfTransitionEdge
+ * renders its SVG path from the live controlled node endpoints rather than
+ * layout route points.
+ */
+import React from "react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { WorkflowEditorDocument } from "@cyoda/workflow-core";
+import { parseImportPayload } from "@cyoda/workflow-core";
+import type { LayoutResult } from "@cyoda/workflow-layout";
+
+// ── Shared mutable state (hoisted so vi.mock factories can reference it) ────
+
+const { rfCallbacks } = vi.hoisted(() => ({
+  rfCallbacks: {
+    onNodeDragStart: undefined as undefined | ((e: unknown, node: unknown) => void),
+    onNodeDrag: undefined as undefined | ((e: unknown, node: unknown) => void),
+    onNodeDragStop:  undefined as undefined | ((e: unknown, node: unknown) => void),
+    onNodesChange: undefined as undefined | ((changes: unknown[]) => void),
+    latestNodes: undefined as undefined | { id: string; position: { x: number; y: number } }[],
+    latestEdges: undefined as undefined | { id: string; data?: { routePoints?: unknown; labelX?: unknown; labelY?: unknown } }[],
+  },
+}));
+
+const fitView = vi.fn().mockReturnValue(true);
+const setViewport = vi.fn();
+
+// ── React Flow mock ──────────────────────────────────────────────────────────
+
+vi.mock("reactflow", () => {
+  const Position = { Top: "top", Right: "right", Bottom: "bottom", Left: "left" } as const;
+  type MockNode = {
+    id: string;
+    position: { x: number; y: number };
+    width?: number;
+    height?: number;
+    style?: { width?: number; height?: number };
+  };
+  type MockEdge = {
+    id: string;
+    source: string;
+    target: string;
+    sourceHandle?: string;
+    targetHandle?: string;
+    type?: string;
+    data?: unknown;
+    selected?: boolean;
+  };
+
+  const sizeOf = (node: MockNode) => ({
+    width: node.width ?? node.style?.width ?? 160,
+    height: node.height ?? node.style?.height ?? 60,
+  });
+  const handlePoint = (
+    node: MockNode,
+    handle: string | undefined,
+    role: "source" | "target",
+  ) => {
+    const resolved = handle ?? (role === "source" ? "bottom" : "top");
+    const { width, height } = sizeOf(node);
+    if (resolved === "top") return { x: node.position.x + width / 2, y: node.position.y };
+    if (resolved === "right") return { x: node.position.x + width, y: node.position.y + height / 2 };
+    if (resolved === "left") return { x: node.position.x, y: node.position.y + height / 2 };
+    return { x: node.position.x + width / 2, y: node.position.y + height };
+  };
+  const handlePosition = (handle: string | undefined, role: "source" | "target") => {
+    const resolved = handle ?? (role === "source" ? "bottom" : "top");
+    if (resolved === "top") return Position.Top;
+    if (resolved === "right") return Position.Right;
+    if (resolved === "left") return Position.Left;
+    return Position.Bottom;
+  };
+
+  const ReactFlow = ({
+    nodes,
+    edges,
+    edgeTypes,
+    onNodesChange,
+    onNodeDragStart,
+    onNodeDrag,
+    onNodeDragStop,
+  }: {
+    nodes?: MockNode[];
+    edges?: MockEdge[];
+    edgeTypes?: Record<string, React.ComponentType<any>>;
+    onNodesChange?: (changes: unknown[]) => void;
+    onNodeDragStart?: (e: unknown, node: unknown) => void;
+    onNodeDrag?: (e: unknown, node: unknown) => void;
+    onNodeDragStop?:  (e: unknown, node: unknown) => void;
+  }) => {
+    rfCallbacks.onNodesChange = onNodesChange;
+    rfCallbacks.onNodeDragStart = onNodeDragStart;
+    rfCallbacks.onNodeDrag = onNodeDrag;
+    rfCallbacks.onNodeDragStop  = onNodeDragStop;
+    rfCallbacks.latestNodes     = nodes;
+    rfCallbacks.latestEdges     = edges as typeof rfCallbacks.latestEdges;
+    const byId = new Map((nodes ?? []).map((node) => [node.id, node]));
+    return (
+      <div data-testid="mock-react-flow">
+        <svg data-testid="mock-react-flow-svg">
+          {(edges ?? []).map((edge) => {
+            const EdgeComponent = edgeTypes?.[edge.type ?? "default"];
+            const source = byId.get(edge.source);
+            const target = byId.get(edge.target);
+            if (!EdgeComponent || !source || !target) return null;
+            const sourcePoint = handlePoint(source, edge.sourceHandle, "source");
+            const targetPoint = handlePoint(target, edge.targetHandle, "target");
+            return (
+              <EdgeComponent
+                key={edge.id}
+                id={edge.id}
+                sourceX={sourcePoint.x}
+                sourceY={sourcePoint.y}
+                targetX={targetPoint.x}
+                targetY={targetPoint.y}
+                sourcePosition={handlePosition(edge.sourceHandle, "source")}
+                targetPosition={handlePosition(edge.targetHandle, "target")}
+                data={edge.data}
+                selected={edge.selected}
+              />
+            );
+          })}
+        </svg>
+      </div>
+    );
+  };
+  return {
+    applyNodeChanges: (changes: Array<{ id: string; type: string; position?: { x: number; y: number }; dragging?: boolean; selected?: boolean }>, nodes: Array<{ id: string; position: { x: number; y: number } }>) =>
+      nodes.map((node) => {
+        const change = changes.find((candidate) => candidate.id === node.id);
+        if (!change) return node;
+        if (change.type === "position" && change.position) {
+          return { ...node, position: change.position };
+        }
+        if (change.type === "select" && "selected" in change) {
+          return { ...node, selected: change.selected };
+        }
+        return node;
+      }),
+    ReactFlow,
+    ReactFlowProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+    Background: () => null,
+    Controls: () => null,
+    MiniMap: () => null,
+    BaseEdge: ({ id, path, style, markerEnd }: { id: string; path: string; style?: React.CSSProperties; markerEnd?: string }) => (
+      <path data-testid={`rf-edge-path-${id}`} d={path} style={style} markerEnd={markerEnd} />
+    ),
+    EdgeLabelRenderer: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+    Handle: () => null,
+    ConnectionMode: { Loose: "loose" },
+    Position,
+    useReactFlow: () => ({ fitView, setViewport }),
+  };
+});
+
+// ── Layout mock ──────────────────────────────────────────────────────────────
+
+vi.mock("@cyoda/workflow-layout", () => ({
+  layoutGraph: vi.fn(),
+  estimateNodeSize: () => ({ width: 160, height: 60 }),
+}));
+
+// ── Imports that resolve after mocks are hoisted ─────────────────────────────
+
+import { layoutGraph } from "@cyoda/workflow-layout";
+import { WorkflowEditor } from "../src/index.js";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function fixture(json: string): WorkflowEditorDocument {
+  const result = parseImportPayload(json);
+  if (!result.document) throw new Error("fixture parse failed");
+  return result.document;
+}
+
+function stateUuid(
+  doc: WorkflowEditorDocument,
+  workflow: string,
+  stateCode: string,
+): string {
+  const entry = Object.entries(doc.meta.ids.states).find(
+    ([, ptr]) => ptr.workflow === workflow && ptr.state === stateCode,
+  );
+  if (!entry) throw new Error(`UUID not found for ${workflow}:${stateCode}`);
+  return entry[0];
+}
+
+function buildLayout(doc: WorkflowEditorDocument): LayoutResult {
+  const startId = stateUuid(doc, "wf", "start");
+  const endId   = stateUuid(doc, "wf", "end");
+  const transitionUuid = Object.keys(doc.meta.ids.transitions)[0]!;
+  return {
+    positions: new Map([
+      [startId, { id: startId, x: 100, y: 100, width: 160, height: 60 }],
+      [endId,   { id: endId,   x: 100, y: 300, width: 160, height: 60 }],
+    ]),
+    edges: new Map([
+      [transitionUuid, {
+        id: transitionUuid,
+        points: [{ x: 180, y: 160 }, { x: 180, y: 300 }],
+        labelX: 180,
+        labelY: 230,
+        labelWidth: 60,
+        labelHeight: 20,
+      }],
+    ]),
+    width: 500,
+    height: 500,
+    preset: "configuratorReadable",
+  };
+}
+
+const TWO_STATE_CONNECTED = JSON.stringify({
+  importMode: "MERGE",
+  workflows: [
+    {
+      version: "1.0",
+      name: "wf",
+      initialState: "start",
+      active: true,
+      states: {
+        start: { transitions: [{ name: "go", next: "end", manual: false, disabled: false }] },
+        end:   { transitions: [] },
+      },
+    },
+  ],
+});
+
+// ── Setup / teardown ─────────────────────────────────────────────────────────
+
+// Provide a complete in-memory localStorage so WorkflowEditor's persistence
+// code works in the jsdom test environment (the default jsdom stub is partial).
+const lsData: Record<string, string> = {};
+const localStorageMock = {
+  getItem:    (k: string) => lsData[k] ?? null,
+  setItem:    (k: string, v: string) => { lsData[k] = v; },
+  removeItem: (k: string) => { delete lsData[k]; },
+  clear:      () => { for (const k of Object.keys(lsData)) delete lsData[k]; },
+  get length() { return Object.keys(lsData).length; },
+  key:        (i: number) => Object.keys(lsData)[i] ?? null,
+};
+
+beforeEach(() => {
+  // Reset localStorage store.
+  for (const k of Object.keys(lsData)) delete lsData[k];
+  vi.stubGlobal("localStorage", localStorageMock);
+
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 1; });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  rfCallbacks.onNodeDragStart = undefined;
+  rfCallbacks.onNodeDrag = undefined;
+  rfCallbacks.onNodeDragStop  = undefined;
+  rfCallbacks.onNodesChange = undefined;
+  rfCallbacks.latestNodes = undefined;
+  rfCallbacks.latestEdges     = undefined;
+  fitView.mockClear();
+  setViewport.mockClear();
+  vi.mocked(layoutGraph).mockResolvedValue({ positions: new Map(), edges: new Map(), width: 0, height: 0, preset: "configuratorReadable" });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+// ── Tests: edge routing during drag ─────────────────────────────────────────
+
+describe("edge routing during drag", () => {
+  it("updates the rendered edge path as node position changes without a click", async () => {
+    const doc = fixture(TWO_STATE_CONNECTED);
+    const startId = stateUuid(doc, "wf", "start");
+    const transitionUuid = Object.keys(doc.meta.ids.transitions)[0]!;
+
+    // Resolve layout with ELK routePoints present.
+    vi.mocked(layoutGraph).mockResolvedValue(buildLayout(doc));
+
+    render(<WorkflowEditor document={doc} />);
+
+    // Wait for the ELK layout to propagate to the ReactFlow mock.
+    await waitFor(() => {
+      const node = rfCallbacks.latestNodes?.find((n) => n.id === startId);
+      expect(node?.position).toEqual({ x: 100, y: 100 });
+      expect(screen.getByTestId(`rf-edge-path-${transitionUuid}`).getAttribute("d")).toBeTruthy();
+    });
+    const initialPath = screen.getByTestId(`rf-edge-path-${transitionUuid}`).getAttribute("d");
+
+    // Start dragging the "start" node. Real React Flow updates its internal
+    // transform during drag and reports the live position through onNodeDrag;
+    // the controlled onNodesChange path is also applied when emitted.
+    await act(async () => {
+      rfCallbacks.onNodeDragStart?.(null, {
+        id: startId,
+        position: { x: 100, y: 100 },
+        data: {},
+      });
+      rfCallbacks.onNodesChange?.([
+        {
+          id: startId,
+          type: "position",
+          position: { x: 250, y: 150 },
+          dragging: true,
+        },
+      ]);
+      rfCallbacks.onNodeDrag?.(null, {
+        id: startId,
+        position: { x: 250, y: 150 },
+        data: {},
+      });
+    });
+
+    const nodeDuring = rfCallbacks.latestNodes?.find((n) => n.id === startId);
+    expect(nodeDuring?.position).toEqual({ x: 250, y: 150 });
+
+    // This assertion targets the actual SVG path used in the browser, not just
+    // internal edge data. No click/selection update is involved here.
+    const pathDuring = screen.getByTestId(`rf-edge-path-${transitionUuid}`).getAttribute("d");
+    expect(pathDuring).toBeTruthy();
+    expect(pathDuring).not.toEqual(initialPath);
+  });
+
+  it("keeps the rendered edge path changed after drag stop while layout is still stale", async () => {
+    const doc = fixture(TWO_STATE_CONNECTED);
+    const startId = stateUuid(doc, "wf", "start");
+    const transitionUuid = Object.keys(doc.meta.ids.transitions)[0]!;
+
+    vi.mocked(layoutGraph).mockResolvedValue(buildLayout(doc));
+
+    render(<WorkflowEditor document={doc} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`rf-edge-path-${transitionUuid}`).getAttribute("d")).toBeTruthy();
+    });
+    const initialPath = screen.getByTestId(`rf-edge-path-${transitionUuid}`).getAttribute("d");
+
+    await act(async () => {
+      rfCallbacks.onNodeDragStart?.(null, { id: startId, position: { x: 100, y: 100 }, data: {} });
+      rfCallbacks.onNodesChange?.([
+        {
+          id: startId,
+          type: "position",
+          position: { x: 250, y: 150 },
+          dragging: true,
+        },
+      ]);
+      rfCallbacks.onNodeDrag?.(null, {
+        id: startId,
+        position: { x: 250, y: 150 },
+        data: {},
+      });
+      rfCallbacks.onNodeDragStop?.(null, {
+        id: startId,
+        position: { x: 250, y: 150 },
+        data: {},
+      });
+    });
+
+    const nodeAfterStop = rfCallbacks.latestNodes?.find((n) => n.id === startId);
+    expect(nodeAfterStop?.position).toEqual({ x: 250, y: 150 });
+
+    const pathAfterStop = screen.getByTestId(`rf-edge-path-${transitionUuid}`).getAttribute("d");
+    expect(pathAfterStop).toBeTruthy();
+    expect(pathAfterStop).not.toEqual(initialPath);
+  });
+});
+
+// ── Tests: position persistence ──────────────────────────────────────────────
+
+describe("node drag — position persistence", () => {
+  it("dispatches setNodePosition on drag stop and reflects in onChange doc", async () => {
+    const doc = fixture(TWO_STATE_CONNECTED);
+    const startId = stateUuid(doc, "wf", "start");
+    let latestDoc: WorkflowEditorDocument | undefined;
+
+    vi.mocked(layoutGraph).mockResolvedValue(buildLayout(doc));
+
+    render(
+      <WorkflowEditor
+        document={doc}
+        onChange={(d) => { latestDoc = d; }}
+      />,
+    );
+
+    await waitFor(() => expect(rfCallbacks.onNodeDragStop).toBeDefined());
+
+    await act(async () => {
+      rfCallbacks.onNodeDragStop?.(null, {
+        id: startId,
+        position: { x: 250, y: 150 },
+        data: {},
+      });
+    });
+
+    expect(latestDoc?.meta.workflowUi.wf?.layout?.nodes?.start).toEqual({
+      x: 250,
+      y: 150,
+      pinned: true,
+    });
+    await waitFor(() => {
+      expect(vi.mocked(layoutGraph)).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          pinned: [expect.objectContaining({ id: startId, x: 250, y: 150 })],
+        }),
+      );
+    });
+  });
+
+  it("persists position to localStorage after drag stop", async () => {
+    const doc = fixture(TWO_STATE_CONNECTED);
+    const startId = stateUuid(doc, "wf", "start");
+
+    vi.mocked(layoutGraph).mockResolvedValue(buildLayout(doc));
+
+    render(<WorkflowEditor document={doc} localStorageKey="test-drag-layout" />);
+
+    await waitFor(() => expect(rfCallbacks.onNodeDragStop).toBeDefined());
+
+    await act(async () => {
+      rfCallbacks.onNodeDragStop?.(null, {
+        id: startId,
+        position: { x: 250, y: 150 },
+        data: {},
+      });
+    });
+
+    const stored = JSON.parse(localStorage.getItem("test-drag-layout") ?? "{}");
+    expect(stored.wf?.layout?.nodes?.start).toEqual({ x: 250, y: 150, pinned: true });
+  });
+
+  it("remount loads persisted position from localStorage into document metadata", () => {
+    const doc = fixture(TWO_STATE_CONNECTED);
+    localStorage.setItem(
+      "test-drag-layout",
+      JSON.stringify({ wf: { layout: { nodes: { start: { x: 300, y: 200, pinned: true } } } } }),
+    );
+
+    let latestDoc: WorkflowEditorDocument | undefined;
+    render(
+      <WorkflowEditor
+        document={doc}
+        localStorageKey="test-drag-layout"
+        onChange={(d) => { latestDoc = d; }}
+      />,
+    );
+
+    // On mount, onChange fires synchronously with the merged document.
+    expect(latestDoc?.meta.workflowUi.wf?.layout?.nodes?.start).toEqual({
+      x: 300,
+      y: 200,
+      pinned: true,
+    });
+    expect(vi.mocked(layoutGraph)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        pinned: [expect.objectContaining({ x: 300, y: 200 })],
+      }),
+    );
+  });
+});
+
+// ── Tests: reset layout ──────────────────────────────────────────────────────
+
+describe("reset layout", () => {
+  it("clears all manual positions when Reset Layout is clicked", async () => {
+    const doc = fixture(TWO_STATE_CONNECTED);
+    const startId = stateUuid(doc, "wf", "start");
+    let latestDoc: WorkflowEditorDocument | undefined;
+
+    vi.mocked(layoutGraph).mockResolvedValue(buildLayout(doc));
+
+    render(
+      <WorkflowEditor
+        document={doc}
+        onChange={(d) => { latestDoc = d; }}
+      />,
+    );
+
+    await waitFor(() => expect(rfCallbacks.onNodeDragStop).toBeDefined());
+
+    // First, establish a manual position via drag.
+    await act(async () => {
+      rfCallbacks.onNodeDragStop?.(null, {
+        id: startId,
+        position: { x: 250, y: 150 },
+        data: {},
+      });
+    });
+
+    expect(latestDoc?.meta.workflowUi.wf?.layout?.nodes?.start).toBeDefined();
+
+    // Click Reset Layout — should clear all manual positions.
+    fireEvent.click(screen.getByTestId("toolbar-reset-layout"));
+
+    expect(latestDoc?.meta.workflowUi.wf?.layout).toBeUndefined();
+  });
+
+  it("drag stop after reset layout re-establishes a position", async () => {
+    const doc = fixture(TWO_STATE_CONNECTED);
+    const startId = stateUuid(doc, "wf", "start");
+    let latestDoc: WorkflowEditorDocument | undefined;
+
+    vi.mocked(layoutGraph).mockResolvedValue(buildLayout(doc));
+
+    render(
+      <WorkflowEditor
+        document={doc}
+        onChange={(d) => { latestDoc = d; }}
+      />,
+    );
+
+    await waitFor(() => expect(rfCallbacks.onNodeDragStop).toBeDefined());
+
+    // Drag to position A.
+    await act(async () => {
+      rfCallbacks.onNodeDragStop?.(null, { id: startId, position: { x: 250, y: 150 }, data: {} });
+    });
+    // Reset.
+    fireEvent.click(screen.getByTestId("toolbar-reset-layout"));
+    expect(latestDoc?.meta.workflowUi.wf?.layout).toBeUndefined();
+
+    // Drag to position B.
+    await act(async () => {
+      rfCallbacks.onNodeDragStop?.(null, { id: startId, position: { x: 400, y: 50 }, data: {} });
+    });
+    expect(latestDoc?.meta.workflowUi.wf?.layout?.nodes?.start).toEqual({
+      x: 400,
+      y: 50,
+      pinned: true,
+    });
+  });
+});
+
+// ── Tests: drag does not affect read-only viewer ─────────────────────────────
+
+describe("viewer mode", () => {
+  it("does not wire drag handlers in viewer mode", async () => {
+    const doc = fixture(TWO_STATE_CONNECTED);
+
+    render(<WorkflowEditor document={doc} mode="viewer" />);
+
+    await waitFor(() => expect(rfCallbacks.latestEdges).toBeDefined());
+
+    // In viewer mode, onNodeDragStart and onNodeDragStop should not be wired.
+    expect(rfCallbacks.onNodeDragStart).toBeUndefined();
+    expect(rfCallbacks.onNodeDragStop).toBeUndefined();
+  });
+});

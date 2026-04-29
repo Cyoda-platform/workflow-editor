@@ -103,6 +103,7 @@ export function Inspector({
                 stateCode={resolved.stateCode}
                 state={resolved.state}
                 disabled={readOnly}
+                issues={selectionIssues}
                 onDispatch={onDispatch}
                 onRequestDelete={() =>
                   onRequestDeleteState(resolved.workflow.name, resolved.stateCode)
@@ -122,6 +123,7 @@ export function Inspector({
                   ]
                 }
                 disabled={readOnly}
+                issues={selectionIssues}
                 onDispatch={onDispatch}
                 onSelectProcessor={(ordinalKey) => {
                   const [, transitionUuid, indexStr] = ordinalKey.split(":");
@@ -138,6 +140,7 @@ export function Inspector({
                 processorUuid={resolved.processorUuid}
                 processorIndex={resolved.processorIndex}
                 transitionUuid={resolved.transitionUuid}
+                workflow={resolved.workflow}
                 disabled={readOnly}
                 onDispatch={onDispatch}
               />

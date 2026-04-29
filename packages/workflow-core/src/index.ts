@@ -3,6 +3,7 @@
 
 export type {
   ArrayCriterion,
+  CommentMeta,
   ConcurrencyToken,
   Criterion,
   DomainPatch,
@@ -28,6 +29,7 @@ export type {
   JsonValue,
   LifecycleCriterion,
   OperatorType,
+  PatchTransaction,
   Processor,
   ProcessorPointer,
   SaveStatus,
@@ -52,6 +54,7 @@ export type {
 
 export {
   OPERATOR_TYPES,
+  PatchConflictError,
   WorkflowApiConflictError,
   WorkflowApiTransportError,
 } from "./types/index.js";
@@ -126,7 +129,9 @@ export {
 export {
   applyPatch,
   applyPatches,
+  applyTransaction,
   invertPatch,
+  invertTransaction,
   validateAfterPatch,
 } from "./patch/index.js";
 

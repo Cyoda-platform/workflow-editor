@@ -87,3 +87,26 @@ describe("WorkflowEditor", () => {
     expect(screen.queryByTestId("toolbar-save")).toBeNull();
   });
 });
+
+describe("WorkflowEditor chrome suppression", () => {
+  it("hides toolbar when chrome.toolbar is false", () => {
+    render(<WorkflowEditor document={fixture(MINIMAL)} chrome={{ toolbar: false }} />);
+    expect(screen.queryByTestId("toolbar")).toBeNull();
+  });
+
+  it("hides inspector when chrome.inspector is false", () => {
+    render(<WorkflowEditor document={fixture(MINIMAL)} chrome={{ inspector: false }} />);
+    expect(screen.queryByTestId("inspector")).toBeNull();
+  });
+
+  it("hides tabs when chrome.tabs is false", () => {
+    render(<WorkflowEditor document={fixture(MULTI)} chrome={{ tabs: false }} />);
+    expect(screen.queryByTestId("workflow-tabs")).toBeNull();
+  });
+
+  it("shows all chrome by default (no chrome prop)", () => {
+    render(<WorkflowEditor document={fixture(MINIMAL)} />);
+    expect(screen.getByTestId("toolbar")).toBeTruthy();
+    expect(screen.getByTestId("inspector")).toBeTruthy();
+  });
+});

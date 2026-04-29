@@ -2,6 +2,7 @@ import { memo } from "react";
 import {
   BaseEdge,
   EdgeLabelRenderer,
+  type Position,
   type EdgeProps,
 } from "reactflow";
 import type { TransitionEdge } from "@cyoda/workflow-graph";
@@ -19,15 +20,24 @@ import { arrowMarkerId } from "./ArrowMarkers.js";
 export interface RfEdgeData {
   edge: TransitionEdge;
   targetIsTerminal: boolean;
-  /** ELK-computed polyline for this edge, if available. */
+  /**
+   * Legacy/read-only layout geometry. The interactive React Flow canvas must
+   * not render from this data because it can lag behind live node positions
+   * during and immediately after drag gestures.
+   */
   routePoints?: { x: number; y: number }[];
-  /** Layout-computed label centre and size. */
+  /** Legacy layout-computed label centre and size. */
   labelX?: number;
   labelY?: number;
   labelWidth?: number;
   labelHeight?: number;
   /** Other nodes' bounding boxes, for obstacle-aware nudging. */
   obstacles?: Rect[];
+  /** Live endpoint coordinates derived from the controlled React Flow nodes. */
+  liveSource?: { x: number; y: number };
+  liveTarget?: { x: number; y: number };
+  liveSourcePosition?: Position;
+  liveTargetPosition?: Position;
 }
 
 function RfTransitionEdgeImpl(props: EdgeProps<RfEdgeData>) {
@@ -43,20 +53,21 @@ function RfTransitionEdgeImpl(props: EdgeProps<RfEdgeData>) {
     selected,
   } = props;
   if (!data) return null;
-  const { edge, targetIsTerminal, routePoints, obstacles } = data;
+  const { edge, targetIsTerminal, obstacles } = data;
+  const resolvedSourceX = data.liveSource?.x ?? sourceX;
+  const resolvedSourceY = data.liveSource?.y ?? sourceY;
+  const resolvedTargetX = data.liveTarget?.x ?? targetX;
+  const resolvedTargetY = data.liveTarget?.y ?? targetY;
 
-  const { path, labelX: fallbackLabelX, labelY: fallbackLabelY } = orthogonalEdgePath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    routePoints,
+  const { path, labelX, labelY } = orthogonalEdgePath({
+    sourceX: resolvedSourceX,
+    sourceY: resolvedSourceY,
+    targetX: resolvedTargetX,
+    targetY: resolvedTargetY,
+    sourcePosition: data.liveSourcePosition ?? sourcePosition,
+    targetPosition: data.liveTargetPosition ?? targetPosition,
     obstacles,
   });
-  const labelX = data.labelX ?? fallbackLabelX;
-  const labelY = data.labelY ?? fallbackLabelY;
 
   const color = laneColor(edge, { targetIsTerminal });
   const dash = laneDashArray(edge);

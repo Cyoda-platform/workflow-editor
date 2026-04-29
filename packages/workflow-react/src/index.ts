@@ -1,5 +1,5 @@
 export { WorkflowEditor } from "./components/WorkflowEditor.js";
-export type { WorkflowEditorProps } from "./components/WorkflowEditor.js";
+export type { WorkflowEditorProps, ChromeOptions } from "./components/WorkflowEditor.js";
 export type { LayoutOptions, LayoutPreset, PinnedNode } from "@cyoda/workflow-layout";
 export type { EditorMode, Selection } from "./state/types.js";
 export { defaultMessages } from "./i18n/en.js";

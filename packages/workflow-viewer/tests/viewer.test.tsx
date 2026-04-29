@@ -3,6 +3,8 @@ import { render, screen } from "@testing-library/react";
 import { parseImportPayload } from "@cyoda/workflow-core";
 import { projectToGraph } from "@cyoda/workflow-graph";
 import { WorkflowViewer } from "../src/index.js";
+import { computeEdgeGeometry } from "../src/components/EdgePath.js";
+import { nudgeLabels } from "../src/layout.js";
 
 function projectFixture(json: unknown) {
   const parsed = parseImportPayload(JSON.stringify(json));
@@ -148,5 +150,81 @@ describe("WorkflowViewer", () => {
     const rect = screen.getByTestId("state-node-wide").querySelector("rect");
     expect(rect?.getAttribute("width")).toBe("220");
     expect(rect?.getAttribute("height")).toBe("96");
+  });
+});
+
+describe("computeEdgeGeometry fallback routing", () => {
+  const source = { id: "a", x: 50, y: 10, width: 144, height: 72 };
+  const target = { id: "b", x: 50, y: 200, width: 144, height: 72 };
+
+  // Build a minimal edge shape for a simple forward transition.
+  const edge = {
+    kind: "transition" as const,
+    id: "e1",
+    workflow: "wf",
+    sourceId: "a",
+    targetId: "b",
+    label: "go",
+    manual: false,
+    disabled: false,
+    isSelf: false,
+    isLoopback: false,
+    parallelIndex: 0,
+    parallelGroupSize: 1,
+    summary: {
+      display: "go",
+      processor: null,
+      criterion: false,
+      execution: null,
+    },
+  } as Parameters<typeof computeEdgeGeometry>[0];
+
+  test("path starts at source bottom-centre", () => {
+    const { d } = computeEdgeGeometry(edge, source, target);
+    const expectedSx = source.x + source.width / 2;        // 122
+    const expectedSy = source.y + source.height;            // 82 (bottom edge)
+    expect(d).toMatch(new RegExp(`^M ${expectedSx} ${expectedSy}\\b`));
+  });
+
+  test("arrowhead endpoint is at target top edge, outside node rect", () => {
+    const { d } = computeEdgeGeometry(edge, source, target);
+    const expectedTy = target.y;                             // 200 (top edge)
+    // Last coordinate pair in the path should end at target top (ty = 200).
+    const coords = [...d.matchAll(/[-\d.]+/g)].map(Number);
+    const lastY = coords[coords.length - 1];
+    expect(lastY).toBe(expectedTy);
+    // Arrowhead y must be strictly less than target bottom.
+    expect(lastY).toBeLessThan(target.y + target.height);
+  });
+});
+
+describe("nudgeLabels collision avoidance", () => {
+  test("separates overlapping labels vertically", () => {
+    const PILL_W = 80;
+    const PILL_H = 24;
+    // Two labels at almost the same position.
+    const items = [
+      { id: "e1", midX: 100, midY: 150, pillW: PILL_W, pillH: PILL_H },
+      { id: "e2", midX: 110, midY: 152, pillW: PILL_W, pillH: PILL_H },
+    ];
+    const result = nudgeLabels(items);
+    const p1 = result.get("e1")!;
+    const p2 = result.get("e2")!;
+    // After nudging, the vertical distance must be at least pillH + 4.
+    const vertDist = Math.abs(p2.midY - p1.midY);
+    expect(vertDist).toBeGreaterThanOrEqual(PILL_H + 4);
+  });
+
+  test("does not move labels that are already separated", () => {
+    const PILL_W = 60;
+    const PILL_H = 24;
+    const items = [
+      { id: "e1", midX: 50,  midY: 100, pillW: PILL_W, pillH: PILL_H },
+      { id: "e2", midX: 300, midY: 100, pillW: PILL_W, pillH: PILL_H },
+    ];
+    const result = nudgeLabels(items);
+    // Horizontally far apart — no vertical nudge needed.
+    expect(result.get("e1")!.midY).toBe(100);
+    expect(result.get("e2")!.midY).toBe(100);
   });
 });

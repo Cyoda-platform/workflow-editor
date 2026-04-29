@@ -51,15 +51,30 @@ importers:
       '@cyoda/workflow-graph':
         specifier: workspace:*
         version: link:../../packages/workflow-graph
+      '@cyoda/workflow-layout':
+        specifier: workspace:*
+        version: link:../../packages/workflow-layout
+      '@cyoda/workflow-monaco':
+        specifier: workspace:*
+        version: link:../../packages/workflow-monaco
+      '@cyoda/workflow-react':
+        specifier: workspace:*
+        version: link:../../packages/workflow-react
       '@cyoda/workflow-viewer':
         specifier: workspace:*
         version: link:../../packages/workflow-viewer
+      monaco-editor:
+        specifier: ^0.52.2
+        version: 0.52.2
       react:
         specifier: ^18.3.1
         version: 18.3.1
       react-dom:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
+      reactflow:
+        specifier: ^11.11.4
+        version: 11.11.4(@types/react@18.3.28)(immer@10.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     devDependencies:
       '@playwright/test':
         specifier: ^1.45.0
@@ -2199,6 +2214,9 @@ packages:
 
   monaco-editor@0.50.0:
     resolution: {integrity: sha512-8CclLCmrRRh+sul7C08BmPBP3P8wVWfBHomsTcndxg5NRCEPfu/mc2AGU8k37ajjDVXcXFc12ORAMUkmk+lkFA==}
+
+  monaco-editor@0.52.2:
+    resolution: {integrity: sha512-GEQWEZmfkOGLdd3XK8ryrfWz3AIP8YymVXiPHEdewrUq7mh0qrKrfHLNCXcbB6sTnMLnOZ3ztSiKcciFUkIJwQ==}
 
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
@@ -5051,6 +5069,8 @@ snapshots:
       ufo: 1.6.3
 
   monaco-editor@0.50.0: {}
+
+  monaco-editor@0.52.2: {}
 
   mri@1.2.0: {}
 

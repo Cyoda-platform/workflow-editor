@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  applyNodeChanges,
   Background,
   ConnectionMode,
   Controls,
@@ -11,8 +12,11 @@ import {
   type Connection,
   type Edge,
   type Node,
+  type NodeChange,
+  type NodeDragHandler,
   type NodeMouseHandler,
   type EdgeMouseHandler,
+  Position,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import type { ValidationIssue } from "@cyoda/workflow-core";
@@ -21,7 +25,7 @@ import type {
   StateNode as GraphStateNode,
   TransitionEdge,
 } from "@cyoda/workflow-graph";
-import { layoutGraph, estimateNodeSize, type LayoutOptions, type LayoutResult } from "@cyoda/workflow-layout";
+import { layoutGraph, estimateNodeSize, type LayoutOptions, type LayoutResult, type NodePosition } from "@cyoda/workflow-layout";
 import { ArrowMarkers } from "./ArrowMarkers.js";
 import { RfStateNode, type RfStateNodeData } from "./RfStateNode.js";
 import { RfTransitionEdge, type RfEdgeData } from "./RfTransitionEdge.js";
@@ -40,7 +44,16 @@ export interface CanvasProps {
   onSelectionChange: (sel: Selection) => void;
   onViewportChange?: (viewport: Viewport) => void;
   onConnect?: (connection: Connection) => void;
+  /** Called once per completed drag with the node UUID and its final position. */
+  onNodeDragStop?: (nodeId: string, x: number, y: number) => void;
+  /**
+   * Increment this counter to force a layout re-run without changing the graph.
+   * Useful for the "Auto Layout" toolbar button.
+   */
+  layoutKey?: number;
   readOnly?: boolean;
+  showMinimap?: boolean;
+  showControls?: boolean;
 }
 
 function toRfNodes(
@@ -82,7 +95,7 @@ function toRfNodes(
 
 function toRfEdges(
   graph: GraphDocument,
-  layout: LayoutResult,
+  displayPositions: Map<string, NodePosition>,
   activeWorkflow: string | null,
   selection: Selection,
   orientation: "vertical" | "horizontal",
@@ -92,14 +105,17 @@ function toRfEdges(
       .filter((n): n is GraphStateNode => n.kind === "state")
       .map((n) => [n.id, n]),
   );
-  // Precompute obstacle bounding boxes once per render.
-  const allObstacles = Array.from(layout.positions.values()).map((p) => ({
-    id: p.id,
-    x: p.x,
-    y: p.y,
-    width: p.width,
-    height: p.height,
-  }));
+  // Precompute obstacle bounding boxes from the currently displayed node
+  // positions. These can differ from the latest ELK result during and shortly
+  // after a manual drag.
+  const allObstacles = Array.from(displayPositions.values())
+    .map((p) => ({
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      width: p.width,
+      height: p.height,
+    }));
   return graph.edges
     .filter((e): e is TransitionEdge => e.kind === "transition")
     .filter((e) => !activeWorkflow || e.workflow === activeWorkflow)
@@ -109,8 +125,6 @@ function toRfEdges(
         target?.role === "terminal" || target?.role === "initial-terminal";
       const selected =
         selection?.kind === "transition" && selection.transitionUuid === e.id;
-      const route = layout.edges.get(e.id);
-      const routePoints = route?.points;
       const obstacles = allObstacles.filter(
         (o) => o.id !== e.sourceId && o.id !== e.targetId,
       );
@@ -121,29 +135,103 @@ function toRfEdges(
       const isHorizontalBackEdge =
         !e.isSelf &&
         orientation === "horizontal" &&
-        (layout.positions.get(e.sourceId)?.x ?? 0) >
-          (layout.positions.get(e.targetId)?.x ?? 0);
+        (displayPositions.get(e.sourceId)?.x ?? 0) >
+          (displayPositions.get(e.targetId)?.x ?? 0);
+      const sourceHandle = anchorHandleId(
+        e.sourceAnchor,
+        "source",
+        orientation,
+        isHorizontalBackEdge,
+      );
+      const targetHandle = anchorHandleId(
+        e.targetAnchor,
+        "target",
+        orientation,
+        isHorizontalBackEdge,
+      );
+      const sourcePosition = positionForHandle(sourceHandle);
+      const targetPosition = positionForHandle(targetHandle);
 
       return {
         id: e.id,
         source: e.sourceId,
         target: e.targetId,
-        sourceHandle: anchorHandleId(e.sourceAnchor, "source", orientation, isHorizontalBackEdge),
-        targetHandle: anchorHandleId(e.targetAnchor, "target", orientation, isHorizontalBackEdge),
+        sourceHandle,
+        targetHandle,
         type: "transition",
         data: {
           edge: e,
           targetIsTerminal: !!targetIsTerminal,
-          routePoints,
-          labelX: route?.labelX,
-          labelY: route?.labelY,
-          labelWidth: route?.labelWidth,
-          labelHeight: route?.labelHeight,
           obstacles,
+          liveSource: pointForHandle(displayPositions.get(e.sourceId), sourcePosition),
+          liveTarget: pointForHandle(displayPositions.get(e.targetId), targetPosition),
+          liveSourcePosition: sourcePosition,
+          liveTargetPosition: targetPosition,
         },
         selected,
       };
     });
+}
+
+function samePosition(
+  a: { x: number; y: number } | undefined,
+  b: { x: number; y: number } | undefined,
+): boolean {
+  return !!a && !!b && a.x === b.x && a.y === b.y;
+}
+
+function positionForHandle(handle: string | undefined): Position {
+  if (handle === "top") return Position.Top;
+  if (handle === "right") return Position.Right;
+  if (handle === "left") return Position.Left;
+  return Position.Bottom;
+}
+
+function pointForHandle(
+  node: NodePosition | undefined,
+  position: Position,
+): { x: number; y: number } | undefined {
+  if (!node) return undefined;
+  if (position === Position.Top) {
+    return { x: node.x + node.width / 2, y: node.y };
+  }
+  if (position === Position.Right) {
+    return { x: node.x + node.width, y: node.y + node.height / 2 };
+  }
+  if (position === Position.Left) {
+    return { x: node.x, y: node.y + node.height / 2 };
+  }
+  return { x: node.x + node.width / 2, y: node.y + node.height };
+}
+
+function positionsFromNodes(
+  nodes: Node<RfStateNodeData>[],
+): Map<string, { x: number; y: number }> {
+  return new Map(nodes.map((node) => [node.id, node.position]));
+}
+
+function reconcileNodes(
+  previousNodes: Node<RfStateNodeData>[],
+  nextBaseNodes: Node<RfStateNodeData>[],
+  previousBasePositions: Map<string, { x: number; y: number }> | null,
+  draggingIds: ReadonlySet<string>,
+): Node<RfStateNodeData>[] {
+  if (previousNodes.length === 0) return nextBaseNodes;
+
+  const previousById = new Map(previousNodes.map((node) => [node.id, node]));
+  return nextBaseNodes.map((baseNode) => {
+    const previous = previousById.get(baseNode.id);
+    if (!previous) return baseNode;
+
+    const previousBase = previousBasePositions?.get(baseNode.id);
+    const basePositionChanged = !samePosition(previousBase, baseNode.position);
+    const position =
+      draggingIds.has(baseNode.id) || !basePositionChanged
+        ? previous.position
+        : baseNode.position;
+
+    return { ...baseNode, position };
+  });
 }
 
 /**
@@ -199,9 +287,19 @@ function CanvasInner({
   onSelectionChange,
   onViewportChange,
   onConnect,
+  onNodeDragStop,
+  layoutKey = 0,
   readOnly,
+  showMinimap = true,
+  showControls = true,
 }: CanvasProps) {
   const [layout, setLayout] = useState<LayoutResult | null>(null);
+  const [nodes, setNodes] = useState<Node<RfStateNodeData>[]>([]);
+  const previousBasePositionsRef = useRef<Map<string, { x: number; y: number }> | null>(null);
+  // Set of node IDs currently being dragged. Cleared to an empty set on drag
+  // stop. Only changes at drag-start / drag-stop (not on every mousemove), so
+  // the dependent `edges` useMemo recomputes at most twice per drag gesture.
+  const [draggingIds, setDraggingIds] = useState<ReadonlySet<string>>(new Set<string>());
   const rf = useReactFlow();
 
   // Extract primitive fields so the effect dep array is stable even when the
@@ -214,9 +312,8 @@ function CanvasInner({
 
   const effectiveOpts = useMemo<LayoutOptions>(
     () => ({ preset, orientation, elk: elkOverrides, nodeSize, pinned }),
-    // elkOverrides / nodeSize / pinned are objects; they are rarely supplied
-    // in practice, so a reference change there is an intentional re-layout.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // elkOverrides / nodeSize / pinned are objects; reference equality is fine
+    // here — a new object passed by the consumer signals an intentional re-layout.
     [preset, orientation, elkOverrides, nodeSize, pinned],
   );
 
@@ -234,7 +331,9 @@ function CanvasInner({
     return () => {
       cancelled = true;
     };
-  }, [graph, effectiveOpts, orientation]);
+    // layoutKey is an external force-re-run trigger; bumping it causes a re-layout
+    // without changing any of the other dependencies.
+  }, [graph, effectiveOpts, orientation, layoutKey]);
 
   // ── Viewport fit ────────────────────────────────────────────────────────────
   //
@@ -291,7 +390,7 @@ function CanvasInner({
 
   const issuesByNode = useMemo(() => groupIssuesByNode(graph, issues), [graph, issues]);
 
-  const nodes = useMemo(
+  const baseNodes = useMemo(
     () =>
       layout
         ? toRfNodes(graph, layout, activeWorkflow, issuesByNode, selection)
@@ -299,12 +398,53 @@ function CanvasInner({
     [graph, layout, activeWorkflow, issuesByNode, selection],
   );
 
+  useEffect(() => {
+    setNodes((previousNodes) =>
+      reconcileNodes(
+        previousNodes,
+        baseNodes,
+        previousBasePositionsRef.current,
+        draggingIds,
+      ),
+    );
+    previousBasePositionsRef.current = positionsFromNodes(baseNodes);
+  }, [baseNodes, draggingIds]);
+
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    setNodes((currentNodes) => applyNodeChanges(changes, currentNodes));
+  }, []);
+
+  const displayPositions = useMemo(() => {
+    const positions = new Map<string, NodePosition>(layout?.positions ?? []);
+    for (const node of nodes) {
+      const layoutPosition = layout?.positions.get(node.id);
+      const size = node.data.size ?? {
+        width: layoutPosition?.width ?? estimateNodeSize(node.data.node.stateCode).width,
+        height: layoutPosition?.height ?? estimateNodeSize(node.data.node.stateCode).height,
+      };
+      positions.set(node.id, {
+        id: node.id,
+        x: node.position.x,
+        y: node.position.y,
+        width: size.width,
+        height: size.height,
+      });
+    }
+    return positions;
+  }, [layout, nodes]);
+
   const edges = useMemo(
     () =>
       layout
-        ? toRfEdges(graph, layout, activeWorkflow, selection, orientation)
+        ? toRfEdges(
+            graph,
+            displayPositions,
+            activeWorkflow,
+            selection,
+            orientation,
+          )
         : [],
-    [graph, layout, activeWorkflow, selection, orientation],
+    [graph, layout, displayPositions, activeWorkflow, selection, orientation],
   );
 
   const onNodeClick: NodeMouseHandler = (_, node) => {
@@ -321,6 +461,32 @@ function CanvasInner({
     onSelectionChange({ kind: "transition", transitionUuid: edge.id });
   };
 
+  const handleNodeDragStart: NodeDragHandler = (_, node) => {
+    setDraggingIds(new Set([node.id]));
+  };
+
+  const handleNodeDrag: NodeDragHandler = (_, node) => {
+    setNodes((currentNodes) =>
+      currentNodes.map((currentNode) =>
+        currentNode.id === node.id
+          ? { ...currentNode, position: { ...node.position } }
+          : currentNode,
+      ),
+    );
+  };
+
+  const handleNodeDragStop: NodeDragHandler = (_, node) => {
+    setNodes((currentNodes) =>
+      currentNodes.map((currentNode) =>
+        currentNode.id === node.id
+          ? { ...currentNode, position: { ...node.position } }
+          : currentNode,
+      ),
+    );
+    onNodeDragStop?.(node.id, node.position.x, node.position.y);
+    setDraggingIds(new Set<string>());
+  };
+
   return (
     <div style={{ width: "100%", height: "100%" }} data-testid="workflow-canvas">
       <ArrowMarkers />
@@ -329,10 +495,14 @@ function CanvasInner({
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        onNodesChange={readOnly ? undefined : handleNodesChange}
         onNodeClick={onNodeClick}
         onEdgeClick={onEdgeClick}
         onPaneClick={() => onSelectionChange(null)}
         onConnect={readOnly ? undefined : onConnect}
+        onNodeDragStart={readOnly ? undefined : handleNodeDragStart}
+        onNodeDrag={readOnly ? undefined : handleNodeDrag}
+        onNodeDragStop={readOnly ? undefined : handleNodeDragStop}
         connectionMode={ConnectionMode.Loose}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
@@ -348,8 +518,8 @@ function CanvasInner({
         }}
       >
         <Background />
-        <Controls showInteractive={false} />
-        <MiniMap zoomable pannable />
+        {showControls && <Controls showInteractive={false} />}
+        {showMinimap && <MiniMap zoomable pannable />}
       </ReactFlow>
     </div>
   );

@@ -54,7 +54,7 @@ export function parseImportPayload(
     };
   }
 
-  const schemaResult = ImportPayloadSchema.safeParse(aliased);
+  const schemaResult = ImportPayloadSchema.safeParse(coerceCanonicalDefaults(aliased));
   if (!schemaResult.success) {
     return { ok: false, issues: zodErrorToIssues(schemaResult.error) };
   }
@@ -78,4 +78,58 @@ export function parseImportPayload(
     document,
     issues,
   };
+}
+
+/**
+ * Pre-schema coercion for canonical Cyoda workflow payloads that omit fields
+ * the schema considers required with a known safe default.
+ *
+ * - Processor objects with a `name` but no `type` default to `"externalized"`.
+ *   The `disabled` field on transitions is handled by `z.boolean().default(false)`
+ *   directly in the schema.
+ *
+ * This runs before Zod validation on the raw parsed value so we can keep the
+ * discriminated union schema unchanged and preserve round-trip semantics.
+ */
+function coerceCanonicalDefaults(value: unknown): unknown {
+  if (!isObj(value)) return value;
+  const v = value as Record<string, unknown>;
+  if (!Array.isArray(v["workflows"])) return value;
+  return {
+    ...v,
+    workflows: v["workflows"].map((wf) => {
+      if (!isObj(wf)) return wf;
+      const w = wf as Record<string, unknown>;
+      if (!isObj(w["states"])) return wf;
+      const states = w["states"] as Record<string, unknown>;
+      const nextStates: Record<string, unknown> = {};
+      for (const [code, state] of Object.entries(states)) {
+        if (!isObj(state)) { nextStates[code] = state; continue; }
+        const s = state as Record<string, unknown>;
+        if (!Array.isArray(s["transitions"])) { nextStates[code] = state; continue; }
+        nextStates[code] = {
+          ...s,
+          transitions: s["transitions"].map((t) => {
+            if (!isObj(t)) return t;
+            const tx = t as Record<string, unknown>;
+            if (!Array.isArray(tx["processors"])) return t;
+            return {
+              ...tx,
+              processors: tx["processors"].map((p) => {
+                if (!isObj(p)) return p;
+                const proc = p as Record<string, unknown>;
+                if (typeof proc["type"] === "string") return p;
+                return { type: "externalized", ...proc };
+              }),
+            };
+          }),
+        };
+      }
+      return { ...w, states: nextStates };
+    }),
+  };
+}
+
+function isObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }

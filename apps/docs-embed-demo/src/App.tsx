@@ -1,12 +1,81 @@
 import { useEffect, useState } from "react";
 import { EmbedViewerPage } from "./pages/EmbedViewerPage.js";
-import { WorkflowExamplesPage } from "./pages/WorkflowExamplesPage.js";
+import { EditorShowcasePage } from "./pages/EditorShowcasePage.js";
+import { HomePage } from "./pages/HomePage.js";
+import { LayoutShowcasePage } from "./pages/LayoutShowcasePage.js";
+import { MonacoPlaygroundPage } from "./pages/MonacoPlaygroundPage.js";
+import { SaveFlowHarnessPage } from "./pages/SaveFlowHarnessPage.js";
+import { UtilitiesPage } from "./pages/UtilitiesPage.js";
+import { ViewerPlaygroundPage } from "./pages/ViewerPlaygroundPage.js";
 
-type RoutePath = "/" | "/examples" | "/embed";
+type RoutePath =
+  | "/"
+  | "/viewer"
+  | "/layout"
+  | "/editor"
+  | "/monaco"
+  | "/save-flow"
+  | "/utilities"
+  | "/embed";
+
+interface RouteDefinition {
+  path: RoutePath;
+  label: string;
+  description: string;
+}
+
+const routes: RouteDefinition[] = [
+  {
+    path: "/",
+    label: "Overview",
+    description: "What each capability page tests.",
+  },
+  {
+    path: "/viewer",
+    label: "Viewer playground",
+    description: "Parse, validate, project, render, and inspect JSON fixtures.",
+  },
+  {
+    path: "/layout",
+    label: "Layout showcase",
+    description: "Compare fallback rendering with ELK layout presets and pinning.",
+  },
+  {
+    path: "/editor",
+    label: "Editor showcase",
+    description: "Full editor: states, transitions, criteria, processors, layout, comments, undo/redo, and clean exported JSON.",
+  },
+  {
+    path: "/monaco",
+    label: "Monaco playground",
+    description: "Schema, markers, patch lifting, and selection sync.",
+  },
+  {
+    path: "/save-flow",
+    label: "Save-flow harness",
+    description: "Simulate save confirmations, warnings, and conflict handling.",
+  },
+  {
+    path: "/utilities",
+    label: "Developer utilities",
+    description: "Verify lower-level public helpers and patches.",
+  },
+  {
+    path: "/embed",
+    label: "Embed viewer",
+    description: "Original slim viewer embed example.",
+  },
+];
 
 function normalizePath(pathname: string): RoutePath | null {
   if (pathname === "/") return "/";
-  if (pathname === "/examples") return "/examples";
+  if (pathname === "/examples") return "/viewer";
+  if (pathname === "/viewer") return "/viewer";
+  if (pathname === "/layout") return "/layout";
+  if (pathname === "/editor") return "/editor";
+  if (pathname === "/monaco") return "/monaco";
+  if (pathname === "/save-flow") return "/save-flow";
+  if (pathname === "/utilities") return "/utilities";
   if (pathname === "/embed") return "/embed";
   return null;
 }
@@ -15,10 +84,7 @@ function useRoutePath() {
   const [routePath, setRoutePath] = useState(() => normalizePath(window.location.pathname));
 
   useEffect(() => {
-    const handlePopState = () => {
-      setRoutePath(normalizePath(window.location.pathname));
-    };
-
+    const handlePopState = () => setRoutePath(normalizePath(window.location.pathname));
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
@@ -29,10 +95,7 @@ function useRoutePath() {
     setRoutePath(path);
   };
 
-  return {
-    routePath,
-    navigate,
-  };
+  return { routePath, navigate };
 }
 
 function NavLink({
@@ -46,11 +109,7 @@ function NavLink({
   label: string;
   onNavigate: (path: RoutePath) => void;
 }) {
-  const isActive =
-    href === "/examples"
-      ? currentPath === "/" || currentPath === "/examples"
-      : currentPath === href;
-
+  const isActive = currentPath === href;
   return (
     <a
       href={href}
@@ -65,6 +124,27 @@ function NavLink({
   );
 }
 
+function CurrentPage({ path }: { path: RoutePath }) {
+  switch (path) {
+    case "/":
+      return <HomePage routes={routes} />;
+    case "/viewer":
+      return <ViewerPlaygroundPage />;
+    case "/layout":
+      return <LayoutShowcasePage />;
+    case "/editor":
+      return <EditorShowcasePage />;
+    case "/monaco":
+      return <MonacoPlaygroundPage />;
+    case "/save-flow":
+      return <SaveFlowHarnessPage />;
+    case "/utilities":
+      return <UtilitiesPage />;
+    case "/embed":
+      return <EmbedViewerPage />;
+  }
+}
+
 export function App() {
   const { routePath, navigate } = useRoutePath();
   const currentPath = routePath ?? "/";
@@ -74,35 +154,31 @@ export function App() {
       <header className="app-shell__header">
         <div className="app-shell__header-inner">
           <div className="brand-lockup">
-            <strong>Cyoda Workflow Examples</strong>
-            <span>Local demo routes inside `apps/docs-embed-demo`</span>
+            <strong>Cyoda Workflow Capability Showcase</strong>
+            <span>Internal demo and regression harness for `apps/docs-embed-demo`</span>
           </div>
           <nav className="nav-links" aria-label="Demo pages">
-            <NavLink
-              href="/examples"
-              currentPath={routePath}
-              label="Workflow playground"
-              onNavigate={navigate}
-            />
-            <NavLink
-              href="/embed"
-              currentPath={routePath}
-              label="Embed viewer example"
-              onNavigate={navigate}
-            />
+            {routes.map((route) => (
+              <NavLink
+                key={route.path}
+                href={route.path}
+                currentPath={routePath}
+                label={route.label}
+                onNavigate={navigate}
+              />
+            ))}
           </nav>
         </div>
       </header>
 
       <main className="app-shell__main">
-        {(currentPath === "/" || currentPath === "/examples") && <WorkflowExamplesPage />}
-        {currentPath === "/embed" && <EmbedViewerPage />}
+        <CurrentPage path={currentPath} />
         {!routePath && (
           <section className="page-section">
             <div className="page-intro">
               <p className="eyebrow">Route not found</p>
               <h1>Demo page not found</h1>
-              <p>Use one of the local demo routes above.</p>
+              <p>Use one of the capability routes above.</p>
             </div>
           </section>
         )}

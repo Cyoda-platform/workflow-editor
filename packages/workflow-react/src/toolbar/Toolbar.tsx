@@ -9,6 +9,10 @@ export interface ToolbarProps {
   onUndo: () => void;
   onRedo: () => void;
   onSave?: () => void;
+  onAddState?: () => void;
+  onAddComment?: () => void;
+  onResetLayout?: () => void;
+  onAutoLayout?: () => void;
 }
 
 export function Toolbar({
@@ -19,6 +23,10 @@ export function Toolbar({
   onUndo,
   onRedo,
   onSave,
+  onAddState,
+  onAddComment,
+  onResetLayout,
+  onAutoLayout,
 }: ToolbarProps) {
   const messages = useMessages();
   return (
@@ -51,6 +59,50 @@ export function Toolbar({
       >
         {messages.toolbar.redo}
       </button>
+      {!readOnly && onAddState && (
+        <button
+          type="button"
+          onClick={onAddState}
+          style={{ ...btnStyle, background: "#0F172A", color: "white", borderColor: "#0F172A" }}
+          data-testid="toolbar-add-state"
+          title="Add State (A)"
+        >
+          + State
+        </button>
+      )}
+      {!readOnly && onAddComment && (
+        <button
+          type="button"
+          onClick={onAddComment}
+          style={btnStyle}
+          data-testid="toolbar-add-comment"
+          title="Add canvas comment"
+        >
+          + Note
+        </button>
+      )}
+      {!readOnly && onAutoLayout && (
+        <button
+          type="button"
+          onClick={onAutoLayout}
+          style={btnStyle}
+          data-testid="toolbar-auto-layout"
+          title="Re-run automatic layout (L)"
+        >
+          Auto Layout
+        </button>
+      )}
+      {!readOnly && onResetLayout && (
+        <button
+          type="button"
+          onClick={onResetLayout}
+          style={btnStyle}
+          data-testid="toolbar-reset-layout"
+          title="Reset all manual positions (Shift+L)"
+        >
+          Reset Layout
+        </button>
+      )}
       <div style={{ flex: 1 }} />
       <ValidationPill
         count={derived.errorCount}

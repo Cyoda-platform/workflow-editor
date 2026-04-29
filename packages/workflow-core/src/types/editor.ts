@@ -72,6 +72,17 @@ export interface EdgeAnchorPair {
   target?: EdgeAnchor;
 }
 
+export interface CommentMeta {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  attachedTo?:
+    | { kind: "state"; stateCode: string }
+    | { kind: "transition"; sourceState: string; transitionName: string }
+    | { kind: "free" };
+}
+
 export interface WorkflowUiMeta {
   layout?: {
     nodes: Record<StateCode, { x: number; y: number; pinned?: boolean }>;
@@ -90,4 +101,9 @@ export interface WorkflowUiMeta {
    * affordances and are never serialised into exported Cyoda JSON.
    */
   viewports?: Partial<Record<"vertical" | "horizontal", EditorViewport>>;
+  /**
+   * Canvas comments, keyed by comment id. Editor-only; never serialised into
+   * exported Cyoda JSON.
+   */
+  comments?: Record<string, CommentMeta>;
 }
